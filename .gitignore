@@ -1,0 +1,9 @@
+# generated files
+*.pdf
+*.hashes
+
+# input data
+*.csv
+
+# macOS junk
+.DS_Store
