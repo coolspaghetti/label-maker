@@ -18,15 +18,22 @@ def norm(s):
     return str(s).lower().strip() 
 # don't forget to cast as string because there's a number column which doesn't have a .lower()
 
-def row_to_string(row):
-    return "|".join([
-        norm(row["Magazine"]),
-        norm(row["Edition"]),
-        norm(row["Year"])
-    ])
+def row_to_string(row, mode):
+    if mode == "guitar-picks":
+        return "|".join([
+            norm(row.get("Line 1", "")),
+            norm(row.get("Line 2", "")),
+            norm(row.get("Line 3", ""))
+        ])
+    else:
+        return "|".join([
+            norm(row.get("Magazine", "")),
+            norm(row.get("Edition", "")),
+            norm(row.get("Year", ""))
+        ])
 
-def hash_row(row):
-    s = row_to_string(row)
+def hash_row(row, mode):
+    s = row_to_string(row, mode)
     return hashlib.sha256(s.encode("utf-8")).hexdigest()
 
 # hash filename for mode
@@ -55,7 +62,7 @@ def filter_new(df, mode):
     new_hashes = set(known)
 
     for _, row in df.iterrows():
-        h = hash_row(row)
+        h = hash_row(row, mode)
         if h not in known:
             new_rows.append(row)
             new_hashes.add(h)
@@ -85,7 +92,7 @@ def generate_labels(rows, mode="clippings"):
         bottom_margin = 6
         line_gap = 2
 
-    else: # magazines
+    elif mode == "magazines":
         label_w = 30 * 2.83
         label_h = 15 * 2.83
 
@@ -95,6 +102,18 @@ def generate_labels(rows, mode="clippings"):
         left_margin = 4
         right_margin = 4
         top_margin = 3
+        bottom_margin = 4
+        line_gap = 1
+    
+    else:
+        label_w = 50 * 2.83
+        label_h = 25 * 2.83
+
+        style_name = "guitar_style"
+
+        left_margin = 6
+        top_margin = 6
+        right_margin = 1
         bottom_margin = 4
         line_gap = 1
 
@@ -152,12 +171,20 @@ def generate_labels(rows, mode="clippings"):
         spaceBefore=0,
         alignment=TA_LEFT
     )
+    guitar_style = ParagraphStyle(
+        "GuitarStyle",
+        parent=styles["Normal"],
+        fontName="Helvetica-Bold",
+        fontSize=10,
+        alignment=TA_LEFT
+    )
 
     style_map = {
         "mag": mag_style,
         "edition": edition_style,
         "mini_mag": mini_mag_style,
-        "mini_edition": mini_edition_style
+        "mini_edition": mini_edition_style,
+        "guitar_style": guitar_style
     }
 
     # =========================
@@ -173,41 +200,41 @@ def generate_labels(rows, mode="clippings"):
     # =========================
     # DRAW LABELS
     # =========================
-    i = 0
-    for row in rows:
+    for i, row in enumerate(rows):
         col = i % cols
         row_i = (i // cols) % rows_per_page
-
         x = x0 + col * label_w
-        y = y0 - row_i * label_h
+        y = y0 - (row_i + 1) * label_h # draw from bottom-left corner
 
         # draw dashed border
         c.setDash(3, 3)
-        c.rect(x, y - label_h, label_w, label_h)
+        c.rect(x, y, label_w, label_h)
         c.setDash()
 
-        # usable text area
         w = label_w - left_margin - right_margin
-        h = label_h - top_margin - bottom_margin
+        cursor = y + label_h - top_margin
 
-        cursor = y - top_margin
-        if mode == "magazines":
-            cursor -= 1
+        if mode == "guitar-picks":
+            # 3 separate lines
+            for line_key in ["Line 1", "Line 2", "Line 3"]:
+                text = str(row.get(line_key, "")) if pd.notna(row.get(line_key)) else ""
+                if text.strip():
+                    p = Paragraph(text, style_map["guitar_style"])
+                    pw, ph = p.wrap(w, label_h)
+                    p.drawOn(c, x + left_margin, cursor - ph)
+                    cursor -= ph + line_gap
+        else:
+            # 2 lines
+            p1 = Paragraph(str(row["Magazine"]), style_map[mag_style_name])
+            w1, h1 = p1.wrap(w, label_h)
+            p1.drawOn(c, x + left_margin, cursor - h1)
+            cursor -= h1 + line_gap
 
-        # magazine name
-        p1 = Paragraph(row["Magazine"], style_map[mag_style_name])
-        w1, h1 = p1.wrap(w, h)
-        p1.drawOn(c, x + left_margin, cursor - h1)
-        cursor -= h1 + line_gap
+            p2 = Paragraph(f"{row['Edition']}/{row['Year']}", style_map[edition_style_name])
+            w2, h2 = p2.wrap(w, label_h)
+            p2.drawOn(c, x + left_margin, cursor - h2)
 
-        # edition / year
-        p2 = Paragraph(f"{row['Edition']}/{row['Year']}", style_map[edition_style_name])
-        w2, h2 = p2.wrap(w, h)
-        p2.drawOn(c, x + left_margin, cursor - h2)
-
-        # next label
-        i += 1
-        if i % (cols * rows_per_page) == 0:
+        if (i + 1) % (cols * rows_per_page) == 0:
             c.showPage()
 
     c.save()
@@ -215,11 +242,16 @@ def generate_labels(rows, mode="clippings"):
 # =========================
 # USER INPUT
 # =========================
-mode = input("Process clippings or magazines? [c/m]: ").strip().lower()
-if mode not in ("c", "m"):
-    raise ValueError("Please enter 'c' for clippings or 'm' for magazines!")
+mode = input("Process clippings, magazines or guitar picks? [c/m/g]: ").strip().lower()
+if mode not in ("c", "m", "g"):
+    raise ValueError("Please enter 'c' for clippings,  'm' for magazines or 'g' for guitar picks!")
 
-mode = "clippings" if mode == "c" else "magazines"
+if mode == "c":
+    mode = "clippings"
+elif mode == "m":
+    mode = "magazines"
+else:
+    mode = "guitar-picks"
 
 csv_name = input("Enter CSV filename (must be in this folder): ").strip()
 if not csv_name.endswith(".csv"):
